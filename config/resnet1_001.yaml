@@ -1,0 +1,55 @@
+globals:
+  seed: 107
+  device: cuda
+  max_epoch: 20
+  patience: 3
+  use_amp: False
+  val_fold: 0
+  debug: False
+  folds: [0, 1, 2, 3, 4]
+  fold_size: 1
+
+dataset:
+  name: BirdCLEFDataset
+  train: {}
+  valid: {}
+
+loader:
+  train: {batch_size: 16, shuffle: True, num_workers: 2, pin_memory: True, drop_last: True}
+  valid: {batch_size: 16, shuffle: False, num_workers: 2, pin_memory: True, drop_last: False}
+
+accumulation: 4
+
+model:
+  name: Resnet1
+  params:
+    base_name: resnext50_32x4d
+    pretrained: true
+    classes: 397
+
+optimizer:
+    name: Adam
+    params:
+      lr: 1.0e-02
+
+scheduler:
+  name: CosineAnnealingWarmRestarts
+  params:
+    T_0: 5
+    T_mult: 2
+
+swa:
+  swa_start: 4
+
+#scheduler:
+#  name: CosineAnnealingLR
+#  params:
+#    eta_min: 1e-5
+#    T_max: 8  # max_epochに合わせた
+
+
+
+loss: {name: BCEWithLogitsLoss, params: {}}
+
+early_stopping:
+  params: {mode: min, patience: 10}
