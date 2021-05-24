@@ -271,7 +271,7 @@ def load_audio_image(df, max_read_samples):
 
 
 class BirdClefDatasetnp(Dataset):
-    def __init__(self, data, load_idx,  max_read_samples=5, sr=SR, is_train=True, duration=DURATION):
+    def __init__(self, data, load_idx,  max_read_samples=5, sr=SR, is_train=True, duration=DURATION, distort=False):
         audio_image_store = load_audio_image(data.iloc[load_idx, :], max_read_samples)
         self.audio_image_store = audio_image_store
         self.meta = data.iloc[load_idx, :].copy().reset_index(drop=True)
@@ -279,6 +279,7 @@ class BirdClefDatasetnp(Dataset):
         self.is_train = is_train
         self.duration = duration
         self.audio_length = self.duration * self.sr
+        self.distort = distort
 
     @staticmethod
     def normalize(image):
@@ -293,7 +294,13 @@ class BirdClefDatasetnp(Dataset):
         row = self.meta.iloc[idx]
         image = self.audio_image_store[row.filename]
 
-        image = image[np.random.choice(len(image))]
+        if self.distort:
+            prob = [1] * len(image)
+            prob[0] = 2
+            prob = [i / sum(prob) for i in prob]
+            image = image[np.random.choice(a=len(image), size=1, p=prob)]
+        else:
+            image = image[np.random.choice(len(image))]
         image = self.normalize(image)
 
         t = np.zeros(N_CLASSES, dtype=np.float32) + 0.0025  # Label smoothing
