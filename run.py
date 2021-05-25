@@ -297,8 +297,9 @@ class BirdClefDatasetnp(Dataset):
         if self.distort:
             prob = [1] * len(image)
             prob[0] = 2
+            prob[-1] = 2
             prob = [i / sum(prob) for i in prob]
-            image = image[np.random.choice(a=len(image), size=1, p=prob)]
+            image = image[np.random.choice(a=len(image), size=1, p=prob)[0]]
         else:
             image = image[np.random.choice(len(image))]
         image = self.normalize(image)
@@ -337,6 +338,19 @@ def stratified_k_folds(label_arr: np.array, n_fold: int, size: float = 1):
         yield train_idx, val_idx
         if i + 1 == n_fold:
             break
+
+
+# augmentation --------------------------------------------------------------------------------------------------------
+def mixup(data: torch.tensor, target: torch.tensor, alpha: float):
+    indices = torch.randperm(data.size(0))
+    shuffled_data = data[indices]
+    shuffled_target = target[indices]
+
+    lam = np.random.beta(alpha, alpha)
+    data = data * lam + shuffled_data * (1 - lam)
+    target = target * lam + shuffled_target * (1 - lam)
+
+    return data, target
 
 
 # train ----------------------------------------------------------------------------------------------------------------
@@ -398,6 +412,16 @@ def train_one_fold(config, train_all):
     # Early stopping
     early_stop = EarlyStopping(**config['early_stopping']['params'])
 
+
+    # MixUp
+    MIXUP = False
+    alpha = 0
+    r = 0
+    if 'MixUp' in config.keys():
+        MIXUP = True
+        alpha = config['MixUp']['alpha']
+        r = config['MixUp']['r']  # ToDo r が存在しない場合は1にする条件分けを追加
+
     # Train Loop
     train_losses = []
     valid_losses = []
@@ -414,6 +438,10 @@ def train_one_fold(config, train_all):
         optimizer.zero_grad()
         for step, (images, labels) in enumerate(tqdm(train_loader)):
             images, labels = images.float().to(device), labels.float().to(device)
+
+            if MIXUP and np.random.rand(1) < r:
+                images, labels = mixup(images, labels, alpha)
+
             iteration += 1
             # ToDo 経過時間を記録する
 
