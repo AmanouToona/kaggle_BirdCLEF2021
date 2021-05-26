@@ -1,35 +1,36 @@
+# freq, time mask の追加
+
 globals:
   seed: 107
   device: cuda
-  max_epoch: 8
-  patience: 3
-  use_amp: True
+  max_epoch: 20
+  patience: 5
+  use_amp: False
   val_fold: 0
-  debug: True
+  debug: False
   folds: [0, 1, 2, 3, 4]
-  fold_size: 0.1
-  classes: 11
-
-data: annotation_01
+  fold_size: 1
 
 augmentation:
   FreqMask:
     mask_size: 10
     mask_num: 3
   TimeMask:
-    mask_size: 20
-    mask_num: 5
-
+    mask_size: 10
+    mask_num: 6
 
 dataset:
   name: BirdCLEFDataset
-  train: {}
-  valid:
-    is_train: False
+  train: {distort: true}
+  valid: {}
 
 loader:
   train: {batch_size: 32, shuffle: True, num_workers: 2, pin_memory: True, drop_last: True}
   valid: {batch_size: 16, shuffle: False, num_workers: 2, pin_memory: True, drop_last: False}
+
+MixUp:
+  alpha: 1.0
+  r: 0.5
 
 accumulation: 2
 
@@ -46,13 +47,13 @@ optimizer:
       lr: 1.0e-03
 
 scheduler:
-  name: CosineAnnealingWarmRestarts
+  name: CosineAnnealingLR
   params:
-    T_0: 8
-    T_mult: 1
-
-
-loss: {name: BCEWithLogitsLoss, params: {}}
+    eta_min: 1.0e-06
+    T_max: 20
+loss:
+  name: BCEWithLogitsLoss
+  params: {}
 
 early_stopping:
-  params: {mode: min, patience: 10}
+  params: {mode: min, patience: 5}

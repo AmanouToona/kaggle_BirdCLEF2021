@@ -40,7 +40,8 @@ import os
 
 import gc
 
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
+import matplotlib.pyplot as plt
 
 import joblib
 
@@ -271,7 +272,9 @@ def load_audio_image(df, max_read_samples):
 
 
 class BirdClefDatasetnp(Dataset):
-    def __init__(self, data, load_idx,  max_read_samples=5, sr=SR, is_train=True, duration=DURATION, distort=False):
+    def __init__(self, data, load_idx,  max_read_samples=5, sr=SR, is_train=True, duration=DURATION, distort=False,
+                 transforms: Optional[List] = None):
+
         audio_image_store = load_audio_image(data.iloc[load_idx, :], max_read_samples)
         self.audio_image_store = audio_image_store
         self.meta = data.iloc[load_idx, :].copy().reset_index(drop=True)
@@ -280,6 +283,7 @@ class BirdClefDatasetnp(Dataset):
         self.duration = duration
         self.audio_length = self.duration * self.sr
         self.distort = distort
+        self.transforms = transforms
 
     @staticmethod
     def normalize(image):
@@ -306,6 +310,12 @@ class BirdClefDatasetnp(Dataset):
 
         t = np.zeros(N_CLASSES, dtype=np.float32) + 0.0025  # Label smoothing
         t[LABEL_IDS[self.meta.loc[idx, 'primary_label']]] = 0.995
+
+        if self.is_train:
+            if self.transforms is not None:
+                print('trans')
+                for transform in self.transforms:
+                    image, t = transform(image, t)
 
         return image, t
 
@@ -353,6 +363,48 @@ def mixup(data: torch.tensor, target: torch.tensor, alpha: float):
     return data, target
 
 
+class FreqMask:
+    def __init__(self, mask_size: int = 10, mask_num: int = 1):
+        self.mask_size = mask_size
+        self.mask_num = mask_num
+
+    def __call__(self, img: np.array, t: np.array) -> Tuple[np.array, np.array]:
+        mask_val = img[0].mean()
+        freq_max = img.shape[1]
+
+        mask_num = np.random.randint(0, self.mask_num)
+
+        for _ in range(mask_num):
+            mask_fmin = np.random.randint(0, freq_max)
+            mask_size = np.random.randint(1, self.mask_size)
+            mask_fmax = min(mask_fmin + mask_size, freq_max)
+
+            img[:, mask_fmin: mask_fmax, :] = mask_val
+
+        return img, t
+
+
+class TimeMask:
+    def __init__(self, mask_size: int = 10, mask_num: int = 1):
+        self.mask_size = mask_size
+        self.mask_num = mask_num
+
+    def __call__(self, img: np.array, t: np.array) -> Tuple[np.array, np.array]:
+        mask_val = img[0].mean()
+        time_max = img.shape[2]
+
+        mask_num = np.random.randint(0, self.mask_num)
+
+        for _ in range(mask_num):
+            mask_tmin = np.random.randint(0, time_max)
+            mask_size = np.random.randint(1, self.mask_size)
+            mask_tmax = min(mask_tmin + mask_size, time_max)
+
+            img[..., mask_tmin: mask_tmax] = mask_val
+
+        return img, t
+
+
 # train ----------------------------------------------------------------------------------------------------------------
 def train_one_fold(config, train_all):
     torch.backends.cudnn.benchmark = True
@@ -366,11 +418,20 @@ def train_one_fold(config, train_all):
     valid_idx = config['globals']['valid_idx']
     train_idx = config['globals']['train_idx']
 
-    # valid_dataset = BirdCLEFDataset(train_all.loc[valid_idx, :], **config['dataset']['train'])
-    # train_dataset = BirdCLEFDataset(train_all.loc[train_idx, :], **config['dataset']['valid'])
+    transforms = None
+    if 'augmentation' in config.keys():
+        transforms = list()
+        for augment in config['augmentation'].keys():
+            aug_class = augment
+            aug_params = config['augmentation'][augment]
+            transforms.append(eval(aug_class)(**aug_params))
 
-    valid_dataset = BirdClefDatasetnp(train_all, valid_idx, **config['dataset']['train'])
-    train_dataset = BirdClefDatasetnp(train_all, train_idx, **config['dataset']['valid'])
+
+    # valid_dataset = BirdCLEFDataset(train_all.loc[valid_idx, :], **config['dataset']['valid'])
+    # train_dataset = BirdCLEFDataset(train_all.loc[train_idx, :], **config['dataset']['train'])
+
+    valid_dataset = BirdClefDatasetnp(train_all, valid_idx, **config['dataset']['valid'])
+    train_dataset = BirdClefDatasetnp(train_all, train_idx, transforms=transforms, **config['dataset']['train'])
 
     logger.debug(f'valid_dataset: {len(valid_dataset)}')
     logger.debug(f'train_dataset: {len(train_dataset)}')
@@ -585,6 +646,7 @@ def main(kaggle=False):
 
         print(args.config_file)
         config_file = CONFIG / args.config_file
+        config_file = config_file.with_suffix('.yaml')
 
         with open(str(config_file), 'r') as f:
             config = yaml.safe_load(f)
