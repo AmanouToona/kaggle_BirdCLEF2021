@@ -31,6 +31,7 @@ from albumentations.pytorch import ToTensorV2
 
 # sound
 import librosa as lb
+from audiomentations import Compose, AddGaussianNoise, AddGaussianSNR, PitchShift, AddBackgroundNoise
 
 from sklearn.model_selection import StratifiedKFold
 
@@ -193,10 +194,11 @@ class MelSpecComputer:
 
 
 class BirdCLEFDataset(Dataset):
-    def __init__(self, data, sr=SR, n_mels=128, fmin=0, fmax=None, duration=DURATION, step=None, res_type="kaiser_fast",
-                 resample=True, label_smoothing=True):
+    def __init__(self, data, load_idx, sr=SR, n_mels=128, fmin=0, fmax=None, duration=DURATION, step=None, res_type="kaiser_fast",
+                 resample=True, label_smoothing=True, distort=False, is_train=True, transforms=None):
 
-        self.data = data
+        # self.data = data  # metadata
+        self.data = data.iloc[load_idx, :].copy().reset_index(drop=True)
 
         self.sr = sr
         self.n_mels = n_mels
@@ -210,9 +212,20 @@ class BirdCLEFDataset(Dataset):
         self.res_type = res_type
         self.resample = resample
         self.label_smoothing = label_smoothing
+        self.distort = distort
+        self.is_train = is_train
+        self.transforms = transforms
 
         self.mel_spec_computer = MelSpecComputer(sr=self.sr, n_mels=self.n_mels, fmin=self.fmin,
                                                  fmax=self.fmax)
+
+        self.augmenter = Compose([
+            AddGaussianNoise(min_amplitude=0.001, max_amplitude=0.015, p=0.3),
+            AddGaussianSNR(p=0.3),
+            PitchShift(min_semitones=-4, max_semitones=4, p=0.3)
+        ])
+
+        # self.audios = self.load_audio_file(data)
 
     def __len__(self):
         return len(self.data)
@@ -223,14 +236,37 @@ class BirdCLEFDataset(Dataset):
         image = np.stack([image, image, image])
         return image
 
+    def load_audio_file(self, df):
+        def load_row(row):
+            audio, orig_sr = sf.read(str(row.filepath))
+            if self.resample and orig_sr != self.sr:
+                audio = lb.resample(audio, orig_sr, self.sr, res_type=self.res_type)
+
+            audios = []
+            for i in range(self.audio_length, len(audio) + self.step, self.step):
+                start = max(0, i - self.audio_length)
+                end = start + self.audio_length
+                audios.append(audio[start:end])
+
+            if len(audios[-1]) < self.audio_length:
+                audios = audios[:-1]
+
+            return row.filepath, audios
+        pool = joblib.Parallel(4)
+        mapper = joblib.delayed(load_row)
+        tasks = [mapper(row) for row in df.itertuples(False)]
+        res = pool(tqdm(tasks))
+        res = dict(res)
+        return res
+
     def audio_to_image(self, audio):
         melspec = self.mel_spec_computer(audio)
         image = mono_to_color(melspec)
         image = self.normalize(image)
         return image
 
-    def read_file(self, filepath):
-        audio, orig_sr = sf.read(filepath, dtype="float32")
+    def read_file(self, filepath) -> List[np.array]:
+        audio, orig_sr = sf.read(str(filepath))
 
         if self.resample and orig_sr != self.sr:
             audio = lb.resample(audio, orig_sr, self.sr, res_type=self.res_type)
@@ -244,18 +280,34 @@ class BirdCLEFDataset(Dataset):
         if len(audios[-1]) < self.audio_length:
             audios = audios[:-1]
 
-        images = [self.audio_to_image(audio) for audio in audios]
-        images = np.stack(images)
-
-        return images
+        return audios
 
     def __getitem__(self, idx):
-        img = self.read_file(self.data.loc[idx, 'filepath'])
+        audios = self.read_file(self.data.loc[idx, 'filepath'])
+
+        if self.distort:
+            prob = [1] * len(audios)
+            prob[0] = 2
+            prob[-1] = 2
+            prob = [i / sum(prob) for i in prob]
+            audio = audios[np.random.choice(a=len(audios), size=1, p=prob)[0]]
+        else:
+            audio = audios[np.random.choice(len(audios))]
+
+        if self.augmenter is not None:
+            audio = self.augmenter(audio, sample_rate=self.sr)
+
+        img = self.audio_to_image(audio)
 
         label = np.zeros(N_CLASSES, dtype=np.float32)
         if self.label_smoothing:
             label += 0.0025
         label[LABEL_IDS[self.data.loc[idx, 'primary_label']]] = 0.995
+
+        if self.is_train:
+            if self.transforms is not None:
+                for transform in self.transforms:
+                    img, t = transform(img, label)
 
         return img, label
 
@@ -313,7 +365,6 @@ class BirdClefDatasetnp(Dataset):
 
         if self.is_train:
             if self.transforms is not None:
-                print('trans')
                 for transform in self.transforms:
                     image, t = transform(image, t)
 
@@ -325,16 +376,6 @@ class Normalize:
         max_vol = np.abs(y).max()
         y_vol = y * 1 / max_vol
         return np.asfortranarray(y_vol)
-
-
-class Compose:
-    def __init__(self, transforms: list):
-        self.transforms = transforms
-
-    def __call__(self, y: np.ndarray):
-        for trns in self.transforms:
-            y = trns(y)
-        return y
 
 
 # scheduler --------------------------------------------------------------------------------------------------
@@ -426,12 +467,10 @@ def train_one_fold(config, train_all):
             aug_params = config['augmentation'][augment]
             transforms.append(eval(aug_class)(**aug_params))
 
+    dataset = config['dataset']['name']
 
-    # valid_dataset = BirdCLEFDataset(train_all.loc[valid_idx, :], **config['dataset']['valid'])
-    # train_dataset = BirdCLEFDataset(train_all.loc[train_idx, :], **config['dataset']['train'])
-
-    valid_dataset = BirdClefDatasetnp(train_all, valid_idx, **config['dataset']['valid'])
-    train_dataset = BirdClefDatasetnp(train_all, train_idx, transforms=transforms, **config['dataset']['train'])
+    valid_dataset = eval(dataset)(train_all, valid_idx, **config['dataset']['valid'])
+    train_dataset = eval(dataset)(train_all, train_idx, transforms=transforms, **config['dataset']['train'])
 
     logger.debug(f'valid_dataset: {len(valid_dataset)}')
     logger.debug(f'train_dataset: {len(train_dataset)}')
@@ -688,6 +727,16 @@ def main(kaggle=False):
     meta_data = pd.read_csv(INPUT / 'train_metadata.csv')
     meta_data['secondary_labels'] = meta_data['secondary_labels'].apply(literal_eval)  # 文字列を List に変換する
 
+    if 'resample' in config.keys():
+        new_meta_data = pd.DataFrame()
+        sample = config['resample']['sample']
+
+        for bird in meta_data['primary_label'].unique():
+            d = meta_data[meta_data['primary_label'] == bird].sample(sample, replace=True)
+            new_meta_data = pd.concat([new_meta_data, d], axis=0)
+
+        meta_data = new_meta_data
+
     if DEBUG:
         meta_data = meta_data.sample(frac=0.1)
 
@@ -696,9 +745,14 @@ def main(kaggle=False):
     #     lambda x: INPUT / 'train_short_audio' / f'{x["primary_label"]}' / f'{x["filename"]}_5.npy', axis=1
     # )
 
-    meta_data['filepath'] = meta_data.apply(
-        lambda x: INPUT / 'audio_images_5' / f'{x["primary_label"]}' / f'{x["filename"]}_5.npy', axis=1
-    )
+    if config['dataset']['name'] == 'BirdCLEFDatasetnp':
+        meta_data['filepath'] = meta_data.apply(
+            lambda x: INPUT / 'audio_images_5' / f'{x["primary_label"]}' / f'{x["filename"]}_5.npy', axis=1
+        )
+    elif config['dataset']['name'] == 'BirdCLEFDataset':
+        meta_data['filepath'] = meta_data.apply(
+            lambda x: INPUT / 'train_short_audio' / f'{x["primary_label"]}' / f'{x["filename"]}', axis=1
+        )
 
     # 全てのラベルが含まれているか確認する
     if set(meta_data['primary_label'].values) == set(TARGET):

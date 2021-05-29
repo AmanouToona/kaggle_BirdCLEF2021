@@ -214,11 +214,69 @@ class AudioToImage:
             return row.filename, images
 
 
-def get_audios_as_images(df):
+def get_audios_as_images(df, suffix=None):
     pool = joblib.Parallel(2)
 
-    # converter = AudioToImage(step=int(DURATION * 0.666 * SR))
-    converter = AudioToImage(suffix=f'{DURATION}')
+    if suffix is None:
+        suffix = DURATION
+    converter = AudioToImage(suffix=suffix)
+    mapper = joblib.delayed(converter)
+    tasks = [mapper(row) for row in df.itertuples(False)]
+
+    pool(tqdm(tasks))
+
+
+class AudioToImage2:
+    def __init__(self, sr=SR, n_mels=128, fmin=0, fmax=None, duration=DURATION, step=None, res_type="kaiser_fast",
+                 resample=True, suffix=''):
+
+        self.sr = sr
+        self.n_mels = n_mels
+        self.fmin = fmin
+        self.fmax = fmax or self.sr // 2
+
+        self.duration = duration
+        self.audio_length = self.duration * self.sr
+        self.step = step or self.audio_length
+
+        self.res_type = res_type
+        self.resample = resample
+
+        self.mel_spec_computer = MelSpecComputer(sr=self.sr, n_mels=self.n_mels, fmin=self.fmin, fmax=self.fmax)
+
+        self.suffix = suffix
+
+    def audio_to_image(self, audio):
+        melspec = self.mel_spec_computer(audio)
+        image = mono_to_color(melspec)
+        return image
+
+    def __call__(self, row, save=True):
+        audio, orig_sr = sf.read(row.filepath, dtype="float32")
+
+        if self.resample and orig_sr != self.sr:
+            audio = lb.resample(audio, orig_sr, self.sr, res_type=self.res_type)
+
+        audios = [audio[i:i + self.audio_length] for i in
+                  range(0, max(1, len(audio) - self.audio_length + 1), self.step)]
+        audios[-1] = crop_or_pad(audios[-1], length=self.audio_length)
+        images = [self.audio_to_image(audio) for audio in audios]
+        images = np.stack(images)
+
+        # if save:
+        #     path = TRAIN_AUDIO_IMAGES_SAVE_ROOT / f"{row.primary_label}/{row.filename}_{self.suffix}.npy"
+        #     path.parent.mkdir(exist_ok=True, parents=True)
+        #     np.save(str(path), images)
+        # else:
+        #     return row.filename, images
+
+
+def get_audios_as_images2(df, suffix=None):
+    pool = joblib.Parallel(2)
+
+    if suffix is None:
+        suffix = DURATION
+    converter = AudioToImage(suffix=suffix)
     mapper = joblib.delayed(converter)
     tasks = [mapper(row) for row in df.itertuples(False)]
 
@@ -227,6 +285,8 @@ def get_audios_as_images(df):
 
 df = make_df(nrows=None)
 
-df.to_csv("rich_train_metadata.csv", index=True)
+# df.to_csv("rich_train_metadata.csv", index=True)
+#
+# get_audios_as_images(df)
 
-get_audios_as_images(df)
+print(df.head())

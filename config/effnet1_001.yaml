@@ -1,0 +1,59 @@
+# freq, time mask の追加
+
+globals:
+  seed: 107
+  device: cuda
+  max_epoch: 20
+  patience: 5
+  use_amp: False
+  val_fold: 0
+  debug: False
+  folds: [0, 1, 2, 3, 4]
+  fold_size: 1
+
+augmentation:
+  FreqMask:
+    mask_size: 10
+    mask_num: 3
+  TimeMask:
+    mask_size: 10
+    mask_num: 6
+
+dataset:
+  name: BirdCLEFDataset
+  train: {distort: true}
+  valid: {}
+
+loader:
+  train: {batch_size: 32, shuffle: True, num_workers: 2, pin_memory: True, drop_last: True}
+  valid: {batch_size: 16, shuffle: False, num_workers: 2, pin_memory: True, drop_last: False}
+
+MixUp:
+  alpha: 1.0
+  r: 0.5
+
+accumulation: 2
+
+model:
+  name: Effnet1
+  params:
+    base_name: efficientnet_b4
+    pretrained: true
+    classes: 397
+
+optimizer:
+    name: Adam
+    params:
+      lr: 1.0e-03
+
+scheduler:
+  name: CosineAnnealingLR
+  params:
+    eta_min: 1.0e-06
+    T_max: 20
+loss:
+  name: BCEWithLogitsLoss
+  params: {}
+
+early_stopping:
+  params: {mode: min, patience: 5}
