@@ -22,7 +22,8 @@ augmentation:
 dataset:
   name: BirdCLEFDataset
   train: {distort: true}
-  valid: {}
+  valid:
+    is_train: False
 
 loader:
   train: {batch_size: 32, shuffle: True, num_workers: 2, pin_memory: True, drop_last: True}

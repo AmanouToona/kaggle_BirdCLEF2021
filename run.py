@@ -195,7 +195,7 @@ class MelSpecComputer:
 
 class BirdCLEFDataset(Dataset):
     def __init__(self, data, load_idx, sr=SR, n_mels=128, fmin=0, fmax=None, duration=DURATION, step=None, res_type="kaiser_fast",
-                 resample=True, label_smoothing=True, distort=False, is_train=True, transforms=None):
+                 resample=True, label_smoothing=True, distort=False, is_train=True, transforms=None, random_start=None):
 
         # self.data = data  # metadata
         self.data = data.iloc[load_idx, :].copy().reset_index(drop=True)
@@ -215,6 +215,7 @@ class BirdCLEFDataset(Dataset):
         self.distort = distort
         self.is_train = is_train
         self.transforms = transforms
+        self.random_start = random_start
 
         self.mel_spec_computer = MelSpecComputer(sr=self.sr, n_mels=self.n_mels, fmin=self.fmin,
                                                  fmax=self.fmax)
@@ -270,6 +271,10 @@ class BirdCLEFDataset(Dataset):
 
         if self.resample and orig_sr != self.sr:
             audio = lb.resample(audio, orig_sr, self.sr, res_type=self.res_type)
+
+        if self.random_start is not None and self.is_train:
+            start = np.random.randint(self.random_start)
+            audio = audio[start:]
 
         audios = []
         for i in range(self.audio_length, len(audio) + self.step, self.step):
@@ -605,6 +610,7 @@ def train_one_fold(config, train_all):
             break
 
         _ = gc.collect()
+        torch.save(model.state_dict(), f'model_trained/{config["globals"]["name"]}_{epoch}.pth')
 
     if swa:
         torch.optim.swa_utils.update_bn(train_loader, swa_model)
@@ -701,7 +707,7 @@ def main(kaggle=False):
         DEBUG = True
 
     if DEBUG:
-        config['globals']['max_epoch'] = 10
+        config['globals']['max_epoch'] = 2
         print('!' * 10, 'debug mode', '!' * 10)
 
     # config file からの設定
@@ -734,7 +740,31 @@ def main(kaggle=False):
         for bird in meta_data['primary_label'].unique():
             d = meta_data[meta_data['primary_label'] == bird].sample(sample, replace=True)
             new_meta_data = pd.concat([new_meta_data, d], axis=0)
+            meta_data = new_meta_data
 
+    elif 'resample2' in config.keys():
+        new_meta_data = pd.DataFrame()
+        meta_data = pd.read_csv(INPUT / 'train_metadata_with_audiolen.csv')
+        meta_data['secondary_labels'] = meta_data['secondary_labels'].apply(literal_eval)
+
+        down_sample = config['resample2']['down_sample']
+        up_sample_rate = config['resample2']['up_sample_rate']
+
+        for bird in meta_data['primary_label'].unique():
+            bird_data = meta_data[meta_data['primary_label'] == bird]
+            bird_data.sort_values(by=['audio_len'], inplace=True)
+            if len(bird_data) >= down_sample:
+                # 音声ファイルの長さが短いものから選ぶ
+                d = bird_data.iloc[:down_sample, :]
+            else:
+                # なるべく短いものが多くなるように選ぶ
+                d = pd.DataFrame()
+                for _ in range(up_sample_rate):
+                    d = pd.concat([d, bird_data], axis=0)
+                if len(d) > down_sample:
+                    d = d.iloc[:down_sample, :]
+
+            new_meta_data = pd.concat([new_meta_data, d], axis=0)
         meta_data = new_meta_data
 
     if DEBUG:

@@ -19,9 +19,15 @@ augmentation:
     mask_size: 10
     mask_num: 6
 
+resample2:
+  down_sample: 200
+  up_sample_rate: 3
+
 dataset:
   name: BirdCLEFDataset
-  train: {distort: true}
+  train:
+    distort: true
+    random_start: 6400
   valid: {}
 
 loader:
