@@ -319,7 +319,16 @@ class BirdCLEFDataset(Dataset):
 
 def load_audio_image(df, max_read_samples):
     def load_row(row):
-        return row.filename, np.load(str(row.filepath))[:max_read_samples]
+        img = np.load(str(row.filepath))
+        if max_read_samples > img.shape[0]:
+            front = int(np.ceil(max_read_samples / 2))
+            rear = int(max_read_samples - front)
+
+            img_front = img[:front]
+            img_rear = img[-rear:]
+            img = np.concatenate([img_front, img_rear], axis=0)
+
+        return row.filename, img
     pool = joblib.Parallel(4)
     mapper = joblib.delayed(load_row)
     tasks = [mapper(row) for row in df.itertuples(False)]
@@ -517,7 +526,6 @@ def train_one_fold(config, train_all):
     # Early stopping
     early_stop = EarlyStopping(**config['early_stopping']['params'])
 
-
     # MixUp
     MIXUP = False
     alpha = 0
@@ -707,7 +715,7 @@ def main(kaggle=False):
         DEBUG = True
 
     if DEBUG:
-        config['globals']['max_epoch'] = 2
+        # config['globals']['max_epoch'] = 2
         print('!' * 10, 'debug mode', '!' * 10)
 
     # config file からの設定
@@ -775,7 +783,7 @@ def main(kaggle=False):
     #     lambda x: INPUT / 'train_short_audio' / f'{x["primary_label"]}' / f'{x["filename"]}_5.npy', axis=1
     # )
 
-    if config['dataset']['name'] == 'BirdCLEFDatasetnp':
+    if config['dataset']['name'] == 'BirdClefDatasetnp':
         meta_data['filepath'] = meta_data.apply(
             lambda x: INPUT / 'audio_images_5' / f'{x["primary_label"]}' / f'{x["filename"]}_5.npy', axis=1
         )
@@ -783,6 +791,8 @@ def main(kaggle=False):
         meta_data['filepath'] = meta_data.apply(
             lambda x: INPUT / 'train_short_audio' / f'{x["primary_label"]}' / f'{x["filename"]}', axis=1
         )
+    else:
+        raise NotImplementedError
 
     # 全てのラベルが含まれているか確認する
     if set(meta_data['primary_label'].values) == set(TARGET):
