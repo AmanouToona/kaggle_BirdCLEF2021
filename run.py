@@ -810,6 +810,8 @@ def main(kaggle=False):
     _ = gc.collect()
 
     for fold_id, train_valid_index in enumerate(train_valid_idx):
+        if fold_id not in folds:
+            continue
         logger.info(f'start train fold: {fold_id:02}')
         fold_config = copy.deepcopy(config)
         fold_config['globals']['valid_idx'] = train_valid_index[1]

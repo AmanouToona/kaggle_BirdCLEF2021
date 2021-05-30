@@ -1,3 +1,4 @@
+# based on resnet1 008
 
 globals:
   seed: 107
@@ -7,7 +8,7 @@ globals:
   use_amp: False
   val_fold: 0
   debug: False
-  folds: [1, 2, 3, 4]
+  folds: [0, 1, 2, 3, 4]
   fold_size: 1
 
 augmentation:
@@ -22,11 +23,11 @@ dataset:
   name: BirdClefDatasetnp
   train:
     distort: true
-    max_read_samples: 6
+    max_read_sample: 6
   valid: {}
 
 resample2:
-  down_sample: 250
+  down_sample: 500
   up_sample_rate: 3
 
 loader:
@@ -40,9 +41,9 @@ MixUp:
 accumulation: 2
 
 model:
-  name: Resnet1
+  name: Vit1
   params:
-    base_name: resnext50_32x4d
+    base_name: vit_base_patch16_224
     pretrained: true
     classes: 397
 
@@ -54,7 +55,7 @@ optimizer:
 scheduler:
   name: CosineAnnealingLR
   params:
-    eta_min: 1.0e-05
+    eta_min: 1.0e-06
     T_max: 10
 loss:
   name: BCEWithLogitsLoss
