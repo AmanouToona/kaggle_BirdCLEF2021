@@ -34,7 +34,7 @@ TRAIN_AUDIO_IMAGES_SAVE_ROOT = INPUT / 'audio_images_5'
 # TRAIN_AUDIO_IMAGES_SAVE_ROOT.mkdir(exist_ok=False, parents=True)
 
 SR = 32000  # sampling  rate
-DURATION = 7
+DURATION = 5
 
 TARGET = ['acafly', 'acowoo', 'aldfly', 'ameavo', 'amecro', 'amegfi', 'amekes', 'amepip', 'amered', 'amerob', 'amewig',
           'amtspa', 'andsol1', 'annhum', 'astfly', 'azaspi1', 'babwar', 'baleag', 'balori', 'banana', 'banswa',
