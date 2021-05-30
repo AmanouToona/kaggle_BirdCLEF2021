@@ -286,7 +286,5 @@ def get_audios_as_images2(df, suffix=None):
 df = make_df(nrows=None)
 
 # df.to_csv("rich_train_metadata.csv", index=True)
-#
-# get_audios_as_images(df)
 
-print(df.head())
+get_audios_as_images(df)
